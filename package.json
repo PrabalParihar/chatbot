@@ -54,7 +54,7 @@
 		"langchain": "^0.0.166",
 		"marked": "^9.1.1",
 		"ml-distance": "^4.0.1",
-		"openai": "^4.17.3",
+		"openai": "^6",
 		"prismjs": "^1.29.0"
 	}
 }

@@ -3,51 +3,60 @@ import OpenAI from 'openai';
 
 const ai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-const createThread = async (prompt: string) => {
-	const thread = await ai.beta.threads.create({
-		messages: [
-			{
-				role: 'user',
-				content: prompt
-			}
+const createThread = async (prompt: string): Promise<{ conversationId: string; firstMessage: string }> => {
+	const conversation = await ai.conversations.create({
+		items: [
+			{ role: 'user', content: prompt }
 		]
 	});
 
-	return thread.id;
+	return { conversationId: conversation.id, firstMessage: prompt };
 };
 
 export const askQuestion = async (
 	question: string,
 	threadId?: string
 ): Promise<{ answer: string; threadId: string }> => {
+	// TODO(landpatch): set OPENAI_MODEL and OPENAI_INSTRUCTIONS. Stored assistant: ASSISTANT_ID from env.
+	const model = process.env.OPENAI_MODEL;
+	const instructions = process.env.OPENAI_INSTRUCTIONS;
+	if (!model || !instructions) {
+		throw new Error(`Set OPENAI_MODEL and OPENAI_INSTRUCTIONS. Stored assistant: ${ASSISTANT_ID}.`);
+	}
+
+	let conversationId: string | undefined;
+	let input: string;
+
 	if (threadId) {
-		await ai.beta.threads.messages.create(threadId, { content: question, role: 'user' });
+		conversationId = threadId;
+		input = question;
 	} else {
-		threadId = await createThread(question);
+		const result = await createThread(question);
+		conversationId = result.conversationId;
+		input = result.firstMessage;
+		threadId = conversationId;
 	}
+
 	console.log('Working on question', question);
-	let run = await ai.beta.threads.runs.create(threadId, { assistant_id: ASSISTANT_ID });
+	const response = await ai.responses.create({
+		model,
+		instructions,
+		conversation: conversationId,
+		input
+	});
 
-	console.log('Check status of run', run.id);
-	console.time(run.id);
-	do {
-		run = await ai.beta.threads.runs.retrieve(run.thread_id, run.id);
-		await new Promise<void>((resolve) => setTimeout(() => resolve(), 500));
-	} while (run.status === 'in_progress' || run.status === 'queued');
+	console.log('Check status of run', response.id);
+	console.time(response.id);
+	console.timeEnd(response.id);
 
-	if (run.status !== 'completed') {
-		throw new Error(`Failed with unexpected status: ${run.status}`);
+	if (response.status !== 'completed') {
+		throw new Error(`Failed with unexpected status: ${response.status}`);
 	}
 
-	console.timeEnd(run.id);
-
-	const message = await ai.beta.threads.messages.list(run.thread_id);
-
-	const [content] = message.data[0].content;
-	if (content.type !== 'text') {
-		console.error("System didn't produce a text", content);
+	if (!response.output_text) {
+		console.error("System didn't produce a text");
 		throw new Error('Wrong content type');
 	}
 
-	return { answer: content.text.value, threadId };
+	return { answer: response.output_text, threadId };
 };
